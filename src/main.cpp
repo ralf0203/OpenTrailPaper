@@ -33,6 +33,8 @@
 #include "diag.h"
 #include "crash_report.h"
 #include "memfault_service.h"
+#include "ant_sensors.h"
+#include "wifi_manager.h"
 
 static TaskHandle_t g_uiTask = nullptr;   // for the stack high-water log
 #include <esp_sleep.h>
@@ -422,6 +424,7 @@ void setup() {
         }
     }
     settings::begin();
+
     g_state.with([](RideState& s) {
         s.ftpW = (uint16_t)settings::ftpWatts();
         s.tzMin = (int16_t)settings::tzMinutes();
@@ -638,11 +641,19 @@ void setup() {
     // Enable automatic light sleep now that every peripheral (GPS UART, BLE, EPD)
     // is up. No-op + logged warning on a stock framework without CONFIG_PM_ENABLE.
     power_mgmt::begin();
+
+    const bool antOk = ant_sensors::begin();
+    diag::log("ANT+: bring-up %s", antOk ? "OK" : "FAILED");
+
     workout_service::begin();   // picker cache locks, before any task runs
     BOOT_STEP("power_mgmt done -> creating tasks");
 
     xTaskCreatePinnedToCore(gps_service::task, "gps", 4096, nullptr, 3, nullptr, 0);
-    xTaskCreatePinnedToCore(ble_sensors::task, "ble", 6144, nullptr, 2, nullptr, 0);
+    // Temporary ANT+ bring-up: the ANT receiver consumes BLE scan windows,
+    // therefore normal BLE sensor discovery is disabled for now.
+    // Existing BLE server/phone connections remain available.
+    // xTaskCreatePinnedToCore(ble_sensors::task, "ble", 6144, nullptr, 2, nullptr, 0);
+    xTaskCreatePinnedToCore(ant_sensors::task, "ant", 3072, nullptr, 2, nullptr, 1);
     xTaskCreatePinnedToCore(ble_server::task, "srv", 4096, nullptr, 1, nullptr, 0);
     xTaskCreatePinnedToCore(ride_recorder::task, "rec", 6144, nullptr, 3, nullptr, 1);
     xTaskCreatePinnedToCore(batteryTask, "bat", 3072, nullptr, 1, nullptr, 1);
@@ -665,6 +676,7 @@ void setup() {
     // and overflowed into a boot loop (Memfault dumps, Oct 2026). loop() logs
     // the high-water mark so the margin is visible.
     xTaskCreatePinnedToCore(ui_dashboard::task, "ui", 12288, nullptr, 2, &g_uiTask, 1);
+    xTaskCreatePinnedToCore(wifi_manager::task, "wifi", 4096, nullptr, 1, nullptr, 0);
 
     diag::log("boot: all tasks started");
     diag::finishBoot();

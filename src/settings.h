@@ -89,6 +89,18 @@ void setLastPosition(double lat, double lon);
 bool rtcTrusted();
 void setRtcTrusted(bool ok);
 
+// --- Wi-Fi ---------------------------------------------------------------
+
+bool wifiEnabled();
+void setWifiEnabled(bool on);
+
+const char* wifiSsid();
+const char* wifiPassword();
+
+// Saves both values in NVS. Empty SSID means "not configured".
+void setWifiCredentials(const char* ssid, const char* password);
+void clearWifiCredentials();
+
 // --- Meshtastic mesh messaging (see mesh_service.h) ------------------------
 
 bool meshEnabled();               // false = the LoRa radio is never powered up

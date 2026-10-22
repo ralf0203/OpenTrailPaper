@@ -66,6 +66,11 @@ char meshShort[8] = "";
 const char* KEYS[ble_sensors::KIND_COUNT] = {"sens_hr", "sens_pwr", "sens_cad", "sens_rdr", "sens_spd"};
 const char* NAME_KEYS[ble_sensors::KIND_COUNT] = {"snm_hr", "snm_pwr", "snm_cad", "snm_rdr", "snm_spd"};
 
+
+bool wifiOn = false;
+char wifiSsidValue[33] = "";
+char wifiPasswordValue[65] = "";
+
 }  // namespace
 
 namespace settings {
@@ -121,6 +126,9 @@ void begin() {
     if (!wheel_speed::validCircMm(wheelMm)) wheelMm = wheel_speed::kDefaultCircMm;
     Serial.printf("[cfg] ftp=%dW tz=%dmin wheel=%dmm sensors=[%s|%s|%s|%s|%s]\n", ftp, tz,
                   wheelMm, addrs[0], addrs[1], addrs[2], addrs[3], addrs[4]);
+    wifiOn = prefs.getBool("wifi_on", false);
+    prefs.getString("wifi_ssid", wifiSsidValue, sizeof(wifiSsidValue));
+    prefs.getString("wifi_pass", wifiPasswordValue, sizeof(wifiPasswordValue));
 }
 
 int ftpWatts() { return ftp; }
@@ -179,6 +187,43 @@ bool usbDrive() { return usbDrv; }
 void setUsbDrive(bool on) {
     usbDrv = on;
     prefs.putBool("usbdrv2", usbDrv);
+}
+
+bool wifiEnabled() {
+    return wifiOn;
+}
+
+void setWifiEnabled(bool on) {
+    if (wifiOn == on) return;
+    wifiOn = on;
+    prefs.putBool("wifi_on", wifiOn);
+}
+
+const char* wifiSsid() {
+    return wifiSsidValue;
+}
+
+const char* wifiPassword() {
+    return wifiPasswordValue;
+}
+
+void setWifiCredentials(const char* ssid, const char* password) {
+    if (!ssid) ssid = "";
+    if (!password) password = "";
+
+    snprintf(wifiSsidValue, sizeof(wifiSsidValue), "%s", ssid);
+    snprintf(wifiPasswordValue, sizeof(wifiPasswordValue), "%s", password);
+
+    prefs.putString("wifi_ssid", wifiSsidValue);
+    prefs.putString("wifi_pass", wifiPasswordValue);
+}
+
+void clearWifiCredentials() {
+    wifiSsidValue[0] = 0;
+    wifiPasswordValue[0] = 0;
+
+    prefs.remove("wifi_ssid");
+    prefs.remove("wifi_pass");
 }
 
 bool showOffline() { return showOff; }
