@@ -31,6 +31,7 @@
 #include "usb_storage.h"
 #include "ble_sensors.h"
 #include "ant_sensors.h"
+#include "hr_source.h"
 #include <esp_random.h>
 
 #include "lora_radio.h"
@@ -1399,12 +1400,25 @@ void renderListScreen(uint8_t* fb) {
     int count = 0;
     const char* title = "";
     const char* footer = "";
+    char hrStatusFooter[80] = {};  // HR_UI_V1
     bool paged = false;   // Navigate / Ride History: rows + ui_render_pager
 
     switch (screen) {
         case SCREEN_SENSORS: {
             title = "PAIRED DEVICES";
             footer = "tap a sensor to pair it · scanning...";
+            // Show both live HR transports without consuming a pairing row.
+            const hr_source::Status hs = hr_source::status();
+            const char* selected = hs.active == hr_source::Source::ANT ? "ANT+"
+                                 : hs.active == hr_source::Source::BLE ? "BLE" : "--";
+            char bleTxt[8] = "--", antTxt[8] = "--";
+            if (hs.bleFresh)
+                snprintf(bleTxt, sizeof(bleTxt), "%u", (unsigned)hs.bleBpm);
+            if (hs.antFresh)
+                snprintf(antTxt, sizeof(antTxt), "%u", (unsigned)hs.antBpm);
+            snprintf(hrStatusFooter, sizeof(hrStatusFooter),
+                     "HR %s  |  BLE %s  ANT+ %s", selected, bleTxt, antTxt);
+            footer = hrStatusFooter;  // HR_UI_STATUS_V1
             // Row 0: the phone this device belongs to (fixed pairing, see
             // ble_server.cpp). Same row recipe as a sensor: name as the title,
             // status first in the subtitle, inverted while connected. Tapping
@@ -2121,6 +2135,7 @@ static void printConsoleHelp() {
     Serial.println("  power                battery voltage + draw (mA) + full fuel-gauge state");
     Serial.println("  aux                  optional Qwiic sensors: baro / accel / compass");
     Serial.println("  ant [status|on|off]  manual ANT+ HRM test (default OFF after reboot)");
+    Serial.println("  hrsource [status|auto|ant|ble]  priority + automatic failover (RAM only)");
     Serial.println("  sensors              paired/connected MACs + everything seen this session");
     Serial.println("  mesh                 node state, neighbours, messages, counters");
     Serial.println("  mesh send <text>     broadcast a message to the channel");
@@ -2176,6 +2191,27 @@ static void runConsoleLine(char* line) {
             Serial.println("[ANT-TEST] OFF");
         } else {
             Serial.println("[ANT-TEST] use: ant [status|on|off]");
+        }
+    } else if (!strcasecmp(cmd, "hrsource")) {
+        // Preference is intentionally RAM-only until radio coexist and failover
+        // are validated in real rides. A reboot always restores AUTO.
+        if (strtok(nullptr, " \t")) {
+            Serial.println("[HR] use: hrsource [status|auto|ant|ble]");
+            return;
+        }
+        if (!arg || !strcasecmp(arg, "status")) {
+            hr_source::report();
+        } else if (!strcasecmp(arg, "auto")) {
+            hr_source::setPreference(hr_source::Preference::AUTO);
+            hr_source::report();
+        } else if (!strcasecmp(arg, "ant")) {
+            hr_source::setPreference(hr_source::Preference::ANT);
+            hr_source::report();
+        } else if (!strcasecmp(arg, "ble")) {
+            hr_source::setPreference(hr_source::Preference::BLE);
+            hr_source::report();
+        } else {
+            Serial.println("[HR] use: hrsource [status|auto|ant|ble]");
         }
     } else if (!strcasecmp(cmd, "cold")) {
         bool aided = !(arg && !strcasecmp(arg, "unaided"));

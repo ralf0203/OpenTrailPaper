@@ -1032,6 +1032,12 @@ void ui_render_dashboard(const RideState& s, bool navActive,
             p.hero = (it.size == DZ_HERO && row.count == 1 && rowH >= 200);
             p.unit = "";
             dashFieldValue(p.field, s, p.value, sizeof(p.value), &p.unit);
+            // Protocol label only in the configurable dashboard HR cell.
+            // Source value comes from RideState; renderer remains host-buildable.
+            if (p.field == DF_HEART_RATE && s.heartRateBpm != 0xFF) {
+                if (s.hrSource == 2) p.unit = "BPM · ANT+";
+                else if (s.hrSource == 1) p.unit = "BPM · BLE";
+            }  // HR_UI_V1
             // Grey on the SENSOR, not on the text. Keying off a "--" value meant
             // a power meter that dropped out while its last reading lingered in
             // the shared state kept rendering a live-looking number. The field

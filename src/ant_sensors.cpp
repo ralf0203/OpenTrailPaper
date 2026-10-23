@@ -8,6 +8,7 @@
 #include "diag.h"
 #include "power_mgmt.h"
 #include "ride_state.h"
+#include "hr_source.h"
 
 #include "ble_sensors.h"
 
@@ -69,6 +70,10 @@ bool startManual()
         return true;
 
     diag::log("ANT+: manual start requested");
+    // A previous run's last packet must never count as a new reception.
+    latestHr.store(0xFF);
+    latestHrMs.store(0);
+    hr_source::clear(hr_source::Source::ANT);
 
     /*
      * Stop OpenTrailPaper from managing BLE scans while ANT+ owns
@@ -182,26 +187,15 @@ void task(void*)
 
                 const uint8_t bpm = latestHr.load();
 
-                g_state.with([&](RideState& s) {
-                    s.heartRateBpm = bpm;
-                    s.hrMs = at;
-                    s.hrConnected = true;
-                });
+                // Only publish into the ANT+ source slot, not RideState.
+                hr_source::ingest(hr_source::Source::ANT, bpm, at);
             }
 
             const uint32_t now = millis();
 
-            // Same 15 s freshness rule as BLE.
-            if (lastPublished &&
-                now - lastPublished > 15000) {
-
-                g_state.with([](RideState& s) {
-                    s.heartRateBpm = 0xFF;
-                    s.hrConnected = false;
-                });
-            }
-
-            if (lastPublished &&
+            // Freshness and failover are handled centrally, including when
+            // the ANT task isn't running. Log only genuinely fresh reception.
+            if (lastPublished && now - lastPublished <= 15000 &&
                 now - lastLog >= 10000) {
 
                 lastLog = now;
@@ -234,10 +228,10 @@ void stop()
 
     ble_sensors::reserveScanForAnt(false);
 
-    g_state.with([](RideState& s) {
-        s.heartRateBpm = 0xFF;
-        s.hrConnected = false;
-    });
+    latestHrMs.store(0);
+    latestHr.store(0xFF);
+    // Do not clear the BLE source; the arbiter immediately falls back to it.
+    hr_source::clear(hr_source::Source::ANT);
 
     diag::log("ANT+: stopped");
 }

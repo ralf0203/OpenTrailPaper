@@ -4,6 +4,7 @@
 #include <NimBLEDevice.h>
 
 #include "ride_state.h"
+#include "hr_source.h"
 #include "settings.h"
 #include "ride_recorder.h"
 #include "routes.h"
@@ -188,10 +189,9 @@ void onHrNotify(NimBLERemoteCharacteristic*, uint8_t* data, size_t len, bool) {
                   hr, hex);
     }
 
-    g_state.with([&](RideState& s) {
-        s.heartRateBpm = hr > 254 ? 254 : (uint8_t)hr;
-        s.hrMs = millis();
-    });
+    // Do not write RideState here: ANT+ may be the selected HR source.
+    hr_source::ingest(hr_source::Source::BLE,
+                      hr > 254 ? 254 : (uint8_t)hr, millis());
 }
 
 // 3 s rolling power average for the hero display (design: "POWER · 3S").
@@ -458,14 +458,15 @@ class ScanCallbacks : public NimBLEScanCallbacks {
 } scanCallbacks;
 
 void markDisconnected(SensorKind kind) {
+    // Only the BLE slot is invalidated. An active ANT+ source must survive.
+    if (kind == KIND_HR) hr_source::clear(hr_source::Source::BLE);
     g_state.with([&](RideState& s) {
         switch (kind) {
             case KIND_RADAR:
                 s.radar = RadarState{};
                 break;
             case KIND_HR:
-                s.hrConnected = false;
-                s.heartRateBpm = 0xFF;
+                // hr_source::tick() updates the public HR fields.
                 break;
             case KIND_POWER:
                 s.powerConnected = false;
@@ -644,7 +645,7 @@ bool connectSensor(SensorKind kind) {
     }
 
     g_state.with([&](RideState& s) {
-        if (kind == KIND_HR) s.hrConnected = true;
+        // A BLE link is not a fresh HR sample; wait for its first notification.
         if (kind == KIND_POWER) s.powerConnected = true;
         // A Cadence-slot link is a cadence source unless its Feature says it
         // has no crank (a combo is both; a cadence-only sensor stays as
@@ -807,24 +808,12 @@ void task(void*) {
             }
         }
 
-        // Invalidate a reading whose packets have stopped arriving. Nothing
-        // else does this while the LINK is still up: markDisconnected only runs
-        // from the BLE disconnect callback, and ui_dashboard's staleness sweep
-        // operates on its own render snapshot (g_state.snapshot()), so the
-        // recorder and the phone never saw it. A strap that is connected but
-        // off-body therefore left its last BPM in RideState forever — frozen on
-        // the dashboard, and written into every FIT record and the ride's HR
-        // average as if the rider were still wearing it.
-        //
-        // Only the VALUES are cleared, not the connected flags: onHrNotify does
-        // not re-raise hrConnected, so clearing that here would grey the field
-        // until the next full reconnect.
-        constexpr uint32_t kStaleMs = 15000;   // ui_dashboard greys out at the same age
+        // HR expiration is now owned by hr_source::tick() for BOTH transports.
+        // Keep the existing radar, power and cadence expiration unchanged.
+        constexpr uint32_t kStaleMs = 15000;
         g_state.with([&](RideState& s) {
             uint32_t now = millis();
             radarExpire(s.radar, now);
-            if (s.heartRateBpm != 0xFF && now - s.hrMs > kStaleMs)
-                s.heartRateBpm = 0xFF;
             if (s.powerW != 0xFFFF && now - s.powerMs > kStaleMs)
                 s.powerW = s.power3sW = 0xFFFF;
             if (s.cadenceRpm != 0xFF && now - s.cadenceMs > kStaleMs)

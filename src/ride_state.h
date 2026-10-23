@@ -64,6 +64,10 @@ struct RideState {
 
     // BLE sensors (0xFF/0xFFFF = no data, matching FIT invalid values)
     uint8_t  heartRateBpm = 0xFF;
+    // HR protocol chosen by hr_source::tick: 0=none, 1=BLE, 2=ANT+.
+    // UI-only metadata; FIT still records the selected heartRateBpm.
+    uint8_t  hrSource = 0;  // HR_UI_V1
+
     uint16_t powerW = 0xFFFF;      // instantaneous
     uint16_t power3sW = 0xFFFF;    // 3 s rolling average (hero display)
     uint8_t  cadenceRpm = 0xFF;

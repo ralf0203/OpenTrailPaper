@@ -34,6 +34,7 @@
 #include "crash_report.h"
 #include "memfault_service.h"
 #include "ant_sensors.h"
+#include "hr_source.h"
 #include "wifi_manager.h"
 
 static TaskHandle_t g_uiTask = nullptr;   // for the stack high-water log
@@ -684,6 +685,8 @@ void setup() {
 }
 
 void loop() {
+    // Only this task selects which transport owns public HR metrics.
+    hr_source::tick();
     // Stack margin of the UI task, once after boot and then every 10 min.
     static uint32_t nextStackLog = 60000;
     if (g_uiTask && (int32_t)(millis() - nextStackLog) >= 0) {
