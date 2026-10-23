@@ -2,7 +2,7 @@
 
 namespace ant_sensors {
 
-bool begin();
+bool startManual();
 void task(void* arg);
 void stop();
 bool running();

@@ -91,6 +91,7 @@ std::atomic<bool> sensorSleepEnabled{true};
 #else
 std::atomic<bool> sensorSleepEnabled{false};
 #endif
+std::atomic<bool> antScanReserved{false};
 uint32_t sleepCount() {
     uint32_t ok, rejected; uint64_t us;
     power_mgmt::sleepStats(ok, rejected, us);
@@ -695,6 +696,11 @@ void task(void*) {
         // active-scanning for the entire ride (recording holds wantScan true) —
         // burning power hunting for a power meter / cadence sensor that doesn't
         // exist. Only paired kinds gate scanning; once they're up, scanning stops.
+        if (antScanReserved.load()) {
+            huntingRadio = false;
+            vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
         bool allConnected = true;
         for (int k = 0; k < KIND_COUNT; ++k) {
             bool paired = settings::sensorAddrCount(k) > 0;
@@ -853,6 +859,29 @@ void task(void*) {
 }
 
 void setScanAlways(bool on) { scanAlways = on; }
+
+void reserveScanForAnt(bool on) {
+    antScanReserved.store(on);
+
+    NimBLEScan* scan = NimBLEDevice::getScan();
+
+    if (scan->isScanning())
+        scan->stop();
+
+    if (!on) {
+        // Restore normal OpenTrailPaper BLE discovery.
+        scan->setActiveScan(true);
+        scan->setInterval(160);
+        scan->setWindow(48);
+        noteActivity();
+    }
+
+    diag::log("BLE scan reserved for ANT+: %s", on ? "yes" : "no");
+}
+
+bool scanReservedForAnt() {
+    return antScanReserved.load();
+}
 
 void holdScan(bool on) {
     scanHeld = on;

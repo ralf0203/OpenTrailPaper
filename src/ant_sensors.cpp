@@ -9,6 +9,10 @@
 #include "power_mgmt.h"
 #include "ride_state.h"
 
+#include "ble_sensors.h"
+
+TaskHandle_t antTaskHandle = nullptr;
+
 namespace {
 
 ant_node_t node{};
@@ -59,28 +63,35 @@ void onAntPaired(
 
 namespace ant_sensors {
 
-bool begin()
+bool startManual()
 {
     if (started.load())
         return true;
 
+    diag::log("ANT+: manual start requested");
+
     /*
-     * Coexist mode uses NimBLE's scan windows for ANT reception.
-     * NimBLE itself must already be initialised.
+     * Stop OpenTrailPaper from managing BLE scans while ANT+ owns
+     * the scan windows.
      */
+    ble_sensors::reserveScanForAnt(true);
+
+    /*
+     * Keep automatic light sleep out of the bring-up completely.
+     */
+    power_mgmt::busyAcquire();
+
     NimBLEScan* scan = NimBLEDevice::getScan();
 
     if (scan->isScanning())
         scan->stop();
 
-    scan->setActiveScan(false);
-
-    // Continuous passive scan. ANT+ receives through these windows.
-    if (!scan->start(0, false, true)) {
-        diag::log("ANT+: failed to start passive BLE scan");
-        return false;
-    }
-
+    /*
+     * IMPORTANT:
+     *
+     * Install ANT coexist hooks BEFORE starting the passive scan.
+     * The previous implementation did this in the opposite order.
+     */
     ant_node_config_t cfg{};
     cfg.on_data = onAntData;
     cfg.on_paired = onAntPaired;
@@ -97,7 +108,8 @@ bool begin()
     );
 
     if (status != ANT_ESPPHY_OK) {
-        scan->stop();
+        power_mgmt::busyRelease();
+        ble_sensors::reserveScanForAnt(false);
         return false;
     }
 
@@ -112,23 +124,48 @@ bool begin()
 
     if (rc != 0) {
         diag::log("ANT+: HRM channel open failed 0x%02X", rc);
+
         ant_node_stop(&node);
-        scan->stop();
+        power_mgmt::busyRelease();
+        ble_sensors::reserveScanForAnt(false);
+
         return false;
     }
 
     /*
-     * esp32-ant keeps a continuous RX activity alive.
-     * Don't allow automatic light sleep during this first bring-up.
+     * Only NOW start the scan whose radio windows ANT hooks.
      */
-    power_mgmt::busyAcquire();
+    scan->setActiveScan(false);
+    scan->setInterval(160);
+    scan->setWindow(48);
+
+    if (!scan->start(0, false, true)) {
+        diag::log("ANT+: passive BLE scan start failed");
+
+        ant_node_stop(&node);
+        power_mgmt::busyRelease();
+        ble_sensors::reserveScanForAnt(false);
+
+        return false;
+    }
 
     started.store(true);
+
+    if (!antTaskHandle) {
+        xTaskCreatePinnedToCore(
+            task,
+            "ant",
+            3072,
+            nullptr,
+            2,
+            &antTaskHandle,
+            1
+        );
+    }
 
     diag::log("ANT+: HRM receiver running");
     return true;
 }
-
 
 void task(void*)
 {
@@ -182,7 +219,6 @@ void task(void*)
     }
 }
 
-
 void stop()
 {
     if (!started.exchange(false))
@@ -190,11 +226,13 @@ void stop()
 
     ant_node_stop(&node);
 
-    power_mgmt::busyRelease();
-
     NimBLEScan* scan = NimBLEDevice::getScan();
     if (scan->isScanning())
         scan->stop();
+
+    power_mgmt::busyRelease();
+
+    ble_sensors::reserveScanForAnt(false);
 
     g_state.with([](RideState& s) {
         s.heartRateBpm = 0xFF;
@@ -203,11 +241,9 @@ void stop()
 
     diag::log("ANT+: stopped");
 }
-
-
 bool running()
 {
     return started.load();
 }
 
-}
+} // namespace ant_sensors

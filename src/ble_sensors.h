@@ -99,4 +99,7 @@ bool sleepAllowed();
 void setSleepAllowed(bool on);
 void reportSleep();
 
+void reserveScanForAnt(bool on);
+bool scanReservedForAnt();
+
 }

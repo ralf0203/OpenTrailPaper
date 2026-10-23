@@ -300,6 +300,7 @@ static const char* wakeCauseStr(esp_sleep_wakeup_cause_t c) {
     }
 }
 
+
 // Crash reports are staged durably before SD initialization; the main loop
 // delivers them once the card is available (including a later successful retry).
 void setup() {

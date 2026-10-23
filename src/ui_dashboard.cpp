@@ -30,6 +30,7 @@
 #include "i2c_bus.h"
 #include "usb_storage.h"
 #include "ble_sensors.h"
+#include "ant_sensors.h"
 #include <esp_random.h>
 
 #include "lora_radio.h"
@@ -2119,6 +2120,7 @@ static void printConsoleHelp() {
     Serial.println("  usbdrive [on|off]    expose the SD to a host; off takes the card back");
     Serial.println("  power                battery voltage + draw (mA) + full fuel-gauge state");
     Serial.println("  aux                  optional Qwiic sensors: baro / accel / compass");
+    Serial.println("  ant [status|on|off]  manual ANT+ HRM test (default OFF after reboot)");
     Serial.println("  sensors              paired/connected MACs + everything seen this session");
     Serial.println("  mesh                 node state, neighbours, messages, counters");
     Serial.println("  mesh send <text>     broadcast a message to the channel");
@@ -2151,6 +2153,30 @@ static void runConsoleLine(char* line) {
 
     if (!strcasecmp(cmd, "help") || !strcmp(cmd, "?")) {
         printConsoleHelp();
+    } else if (!strcasecmp(cmd, "ant")) {
+        // Manual ANT+ diagnostics. The UI task is the ONLY Serial reader.
+        // No auto-start or persistence: a reset always returns to BLE-only.
+        if (strtok(nullptr, " \t")) {
+            Serial.println("[ANT-TEST] use: ant [status|on|off]");
+            return;
+        }
+        if (!arg || !strcasecmp(arg, "status")) {
+            Serial.printf("[ANT-TEST] %s\n", ant_sensors::running() ? "ON" : "OFF");
+        } else if (!strcasecmp(arg, "on")) {
+            if (ride_recorder::isRecording()) {
+                Serial.println("[ANT-TEST] stop recording before ANT+ diagnostics");
+                return;
+            }
+            Serial.println("[ANT-TEST] starting...");
+            Serial.flush();   // Keep this line even if the experimental radio crashes.
+            bool ok = ant_sensors::startManual();
+            Serial.printf("[ANT-TEST] start %s\n", ok ? "OK" : "FAILED");
+        } else if (!strcasecmp(arg, "off")) {
+            ant_sensors::stop();
+            Serial.println("[ANT-TEST] OFF");
+        } else {
+            Serial.println("[ANT-TEST] use: ant [status|on|off]");
+        }
     } else if (!strcasecmp(cmd, "cold")) {
         bool aided = !(arg && !strcasecmp(arg, "unaided"));
         Serial.printf("[cmd] GPS cold-start test (%s)\n", aided ? "aided" : "unaided");
